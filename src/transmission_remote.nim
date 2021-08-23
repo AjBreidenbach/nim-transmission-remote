@@ -1,19 +1,32 @@
 import asyncdispatch, asyncfutures, httpclient, json, marshal, sequtils
 
-
 type TransmissionRemote* = ref object
   url: string
   client: AsyncHttpClient
   sessionId: string
   removeLocalData: bool
   
+type SetTorrentResponse = object
+  result: string
 
 type AddTorrentResponse* = object
-  hashString: string
-  id: int
-  name: string
-  responseType: string
+  hashString*: string
+  id*: int
+  name*: string
+  duplicate*: bool
+  result: string
 
+
+type TransmissionResponse = SetTorrentResponse | AddTorrentResponse
+
+proc isSuccessful*(self: TransmissionResponse): bool =
+  self.result == "success"
+
+proc isError*(self: TransmissionResponse): bool =
+  self.result != "success"
+
+proc error*(self: TransmissionResponse): string =
+  if self.result == "success": "" else: self.result
 
 type TorrentAddOptions = distinct JsonNode
 
@@ -32,6 +45,7 @@ template torrentAddOptionParameter(symbol: untyped, parameterType: untyped, rpcN
 torrentAddOptionParameter(cookies, string)
 torrentAddOptionParameter(downloadDir, string, "download-dir")
 torrentAddOptionParameter(filename, string)
+torrentAddOptionParameter(url, string, "filename")
 torrentAddOptionParameter(metainfo, string)
 torrentAddOptionParameter(paused, bool)
 torrentAddOptionParameter(peerLimit, int, "peer-limit")
@@ -204,108 +218,111 @@ type Key* {.pure.} = enum
 
 
 
-type TorrentProperties = object
+type TorrentProperties* = object
   node: JsonNode
 
-template torrentOptionSetter(symbol:untyped, parameterType:untyped, mutable=false): untyped =
+template torrentOptionProperty(symbol:untyped, parameterType:untyped, mutable=false): untyped =
   when mutable:
     proc `symbol=`*(t: TorrentProperties, value: parameterType) {.inject.} =
       t.node[$Key.symbol] = %value
+  #[
   else:
     proc `symbol=`(t: TorrentProperties, value: parameterType) =
       t.node[$Key.symbol] = %value
+  ]#
+
 
   proc `symbol`*(t: TorrentProperties): parameterType {.inject.} =
     t.node[$Key.symbol].to(parameterType)
     
-proc newTorrentProperties(): TorrentProperties = TorrentProperties(node: newJObject())
+proc newTorrentProperties*(): TorrentProperties = TorrentProperties(node: newJObject())
 
-torrentOptionSetter(bandwidthPriority, int, true)
-torrentOptionSetter(downloadLimit, int, true)
-torrentOptionSetter(downloadLimited, bool, true)
-torrentOptionSetter(filesWanted, seq[string], true)
-torrentOptionSetter(filesUnwanted, seq[string], true)
-torrentOptionSetter(honorsSessionLimits, bool, true)
-torrentOptionSetter(ids, seq[int], true)
-torrentOptionSetter(labels, seq[string], true)
-torrentOptionSetter(location, string, true)
-torrentOptionSetter(peerLimit, int, true)
-torrentOptionSetter(priorityHigh, seq[int], true)
-torrentOptionSetter(priorityLow, seq[int], true)
-torrentOptionSetter(priorityNormal, seq[int], true)
-torrentOptionSetter(queuePosition, int, true)
-torrentOptionSetter(seedIdleLimit, int, true)
-torrentOptionSetter(seedIdleMode, int, true)
-torrentOptionSetter(seedRatioLimit, float, true)
-torrentOptionSetter(seedRatioMode, int, true)
-torrentOptionSetter(trackerAdd, seq[string], true)
-torrentOptionSetter(trackerRemove, seq[int], true)
-#torrentOptionSetter(trackerReplace, seq[int], true)
+torrentOptionProperty(bandwidthPriority, int, mutable=true)
+torrentOptionProperty(downloadLimit, int, mutable=true)
+torrentOptionProperty(downloadLimited, bool, mutable=true)
+torrentOptionProperty(filesWanted, seq[string], mutable=true)
+torrentOptionProperty(filesUnwanted, seq[string], mutable=true)
+torrentOptionProperty(honorsSessionLimits, bool, mutable=true)
+torrentOptionProperty(ids, seq[int], mutable=true)
+torrentOptionProperty(labels, seq[string], mutable=true)
+torrentOptionProperty(location, string, mutable=true)
+torrentOptionProperty(peerLimit, int, mutable=true)
+torrentOptionProperty(priorityHigh, seq[int], mutable=true)
+torrentOptionProperty(priorityLow, seq[int], mutable=true)
+torrentOptionProperty(priorityNormal, seq[int], mutable=true)
+torrentOptionProperty(queuePosition, int, mutable=true)
+torrentOptionProperty(seedIdleLimit, int, mutable=true)
+torrentOptionProperty(seedIdleMode, int, mutable=true)
+torrentOptionProperty(seedRatioLimit, float, mutable=true)
+torrentOptionProperty(seedRatioMode, int, mutable=true)
+torrentOptionProperty(trackerAdd, seq[string], mutable=true)
+torrentOptionProperty(trackerRemove, seq[int], mutable=true)
+#torrentOptionProperty(trackerReplace, seq[int], mutable=true)
 #TODO what is the parameterType on this
-torrentOptionSetter(uploadLimit, int, true)
-torrentOptionSetter(uploadLimited, bool, true)
+torrentOptionProperty(uploadLimit, int, mutable=true)
+torrentOptionProperty(uploadLimited, bool, mutable=true)
 
-torrentOptionSetter(activityDate, int)
-torrentOptionSetter(addedDate, int)
-torrentOptionSetter(comment, string)
-torrentOptionSetter(corruptEver, int)
-torrentOptionSetter(creator, string)
-torrentOptionSetter(dateCreated, int)
-torrentOptionSetter(desiredAvailable, int)
-torrentOptionSetter(doneDate, int)
-torrentOptionSetter(downloadDir, string)
-torrentOptionSetter(downloadedEver, int)
-torrentOptionSetter(editDate, int)
-torrentOptionSetter(error, int)
-torrentOptionSetter(errorString, string)
-torrentOptionSetter(eta, int)
-torrentOptionSetter(etaIdle, int)
-torrentOptionSetter(fileCount, int)
-torrentOptionSetter(files, seq[FileInfo])
-torrentOptionSetter(fileStats, seq[FileStats])
-torrentOptionSetter(hashString, string)
-torrentOptionSetter(haveUnchecked, int)
-torrentOptionSetter(haveValid, int)
-torrentOptionSetter(honorsSessionLimits, bool)
-torrentOptionSetter(id, int)
-torrentOptionSetter(isFinished, bool)
-torrentOptionSetter(isPrivate, bool)
-torrentOptionSetter(isStalled, bool)
-torrentOptionSetter(labels, seq[string])
-torrentOptionSetter(leftUntilDone, int)
-torrentOptionSetter(magnetLink, string)
-torrentOptionSetter(manualAnnounceTime, int)
-torrentOptionSetter(maxConnectedPeers, int)
-torrentOptionSetter(metadataPercentComplete, float)
-torrentOptionSetter(name, string)
-torrentOptionSetter(peers, seq[Peer])
-torrentOptionSetter(peersConnected, int)
-torrentOptionSetter(peersFrom, seq[PeerStats])
-torrentOptionSetter(peersGettingFromUs, int)
-torrentOptionSetter(peersSendingToUs, int)
-torrentOptionSetter(percentDone, float)
-torrentOptionSetter(pieces, string)
-torrentOptionSetter(pieceCount, int)
-torrentOptionSetter(pieceSize, int)
+torrentOptionProperty(activityDate, int)
+torrentOptionProperty(addedDate, int)
+torrentOptionProperty(comment, string)
+torrentOptionProperty(corruptEver, int)
+torrentOptionProperty(creator, string)
+torrentOptionProperty(dateCreated, int)
+torrentOptionProperty(desiredAvailable, int)
+torrentOptionProperty(doneDate, int)
+torrentOptionProperty(downloadDir, string)
+torrentOptionProperty(downloadedEver, int)
+torrentOptionProperty(editDate, int)
+torrentOptionProperty(error, int)
+torrentOptionProperty(errorString, string)
+torrentOptionProperty(eta, int)
+torrentOptionProperty(etaIdle, int)
+torrentOptionProperty(fileCount, int)
+torrentOptionProperty(files, seq[FileInfo])
+torrentOptionProperty(fileStats, seq[FileStats])
+torrentOptionProperty(hashString, string)
+torrentOptionProperty(haveUnchecked, int)
+torrentOptionProperty(haveValid, int)
+torrentOptionProperty(honorsSessionLimits, bool)
+torrentOptionProperty(id, int)
+torrentOptionProperty(isFinished, bool)
+torrentOptionProperty(isPrivate, bool)
+torrentOptionProperty(isStalled, bool)
+#torrentOptionProperty(labels, seq[string])
+torrentOptionProperty(leftUntilDone, int)
+torrentOptionProperty(magnetLink, string)
+torrentOptionProperty(manualAnnounceTime, int)
+torrentOptionProperty(maxConnectedPeers, int)
+torrentOptionProperty(metadataPercentComplete, float)
+torrentOptionProperty(name, string)
+torrentOptionProperty(peers, seq[Peer])
+torrentOptionProperty(peersConnected, int)
+torrentOptionProperty(peersFrom, seq[PeerStats])
+torrentOptionProperty(peersGettingFromUs, int)
+torrentOptionProperty(peersSendingToUs, int)
+torrentOptionProperty(percentDone, float)
+torrentOptionProperty(pieces, string)
+torrentOptionProperty(pieceCount, int)
+torrentOptionProperty(pieceSize, int)
 #priorities
-torrentOptionSetter(primaryMimeType, string)
-torrentOptionSetter(queuePosition, int)
-torrentOptionSetter(rateDownload, int)
-torrentOptionSetter(rateUpload, int)
-torrentOptionSetter(recheckProgress, float)
-torrentOptionSetter(secondsDownloading, int)
-torrentOptionSetter(secondsSeeding, int)
-torrentOptionSetter(startDate, int)
-torrentOptionSetter(status, int)
-torrentOptionSetter(trackers, seq[Tracker])
-torrentOptionSetter(trackerStats, seq[TrackerStats])
-torrentOptionSetter(totalSize, int)
-torrentOptionSetter(torrentFile, string)
-torrentOptionSetter(uploadedEver, int)
-torrentOptionSetter(uploadRatio, float)
+torrentOptionProperty(primaryMimeType, string)
+torrentOptionProperty(queuePosition, int)
+torrentOptionProperty(rateDownload, int)
+torrentOptionProperty(rateUpload, int)
+torrentOptionProperty(recheckProgress, float)
+torrentOptionProperty(secondsDownloading, int)
+torrentOptionProperty(secondsSeeding, int)
+torrentOptionProperty(startDate, int)
+torrentOptionProperty(status, int)
+torrentOptionProperty(trackers, seq[Tracker])
+torrentOptionProperty(trackerStats, seq[TrackerStats])
+torrentOptionProperty(totalSize, int)
+torrentOptionProperty(torrentFile, string)
+torrentOptionProperty(uploadedEver, int)
+torrentOptionProperty(uploadRatio, float)
 #wanted
-torrentOptionSetter(webseeds, seq[string])
-torrentOptionSetter(webseedsSendingToUs, int)
+torrentOptionProperty(webseeds, seq[string])
+torrentOptionProperty(webseedsSendingToUs, int)
 
 
 
@@ -327,7 +344,8 @@ proc postJSON(tr: TransmissionRemote, payload: JsonNode): Future[AsyncResponse] 
   if result.status == Http409:
     result = await postJSON(tr, payload)
 
-  echo payload
+  #echo payload
+  #echo await result.body
   return result
   
   
@@ -336,23 +354,20 @@ proc postAdd(tr: TransmissionRemote, data: JsonNode): Future[AddTorrentResponse]
   let body = parseJson(await response.body)
   let arguments = body["arguments"]
 
+  var marshalledResponse = newJObject()
   try:
-    let torrentAdded = arguments["torrent-added"]
+    marshalledResponse = arguments["torrent-added"]
+  except: discard
+  try:
+    marshalledResponse = arguments["torrent-duplicate"]
 
-    result = to[AddTorrentResponse] $torrentAdded
-    result.responseType = "torrentAdded"
-    return
-
+    marshalledResponse["duplicate"] = %true
   except: discard
 
-  try:
-    let torrentDuplicate = arguments["torrent-duplicate"]
+  marshalledResponse["result"] = body["result"]
 
-    result = to[AddTorrentResponse] $torrentDuplicate
-    result.responseType = "torrentDuplicate"
-    return
+  result = to[AddTorrentResponse] $marshalledResponse
 
-  except: discard
 
 proc addTorrent*(tr: TransmissionRemote, options: TorrentAddOptions): Future[AddTorrentResponse] =
   let serialized = %* {
@@ -364,7 +379,7 @@ proc addTorrent*(tr: TransmissionRemote, options: TorrentAddOptions): Future[Add
 
 
 proc addTorrent*(tr: TransmissionRemote,
-download_dir="",filename="",metainfo="",paused=false
+filename="", download_dir="" ,metainfo="",paused=false
 ): Future[AddTorrentResponse] =
   var torrentOptions = newTorrentAddOptions()
   if download_dir.len != 0: torrentOptions.downloadDir=download_dir
@@ -389,7 +404,6 @@ proc getTorrentsInner(tr: TransmissionRemote,
   if ids.len > 0:
     payload["arguments"]["ids"] = %ids
 
-  echo payload
   let response = await tr.postJSON(payload)
 
 
@@ -399,6 +413,8 @@ proc getTorrentsInner(tr: TransmissionRemote,
 proc getTorrents*(tr: TransmissionRemote, ids: openarray[int], requestedProperties: varargs[Key]): Future[seq[TorrentProperties]] =
   return tr.getTorrentsInner(@ids, @requestedProperties)
 
+proc getAllTorrents*(tr: TransmissionRemote, requestedProperties: varargs[Key]): Future[seq[TorrentProperties]] =
+  return tr.getTorrentsInner(@[], @requestedProperties)
 
 proc getTorrentInner(tr: TransmissionRemote, id: int, requestedProperties: seq[Key] = @[Key.id]): Future[TorrentProperties] {.async.} =
   result = (await tr.getTorrentsInner(@[id], requestedProperties))[0]
@@ -406,10 +422,29 @@ proc getTorrentInner(tr: TransmissionRemote, id: int, requestedProperties: seq[K
 proc getTorrent*(tr: TransmissionRemote, id: int, requestedProperties: varargs[Key]): Future[TorrentProperties] =
   return tr.getTorrentInner(id, @requestedProperties)
 
+
+proc setTorrentsInner(tr: TransmissionRemote, properties: TorrentProperties): Future[SetTorrentResponse] {.async.} =
+  let payload = %*{
+    "method": "torrent-set",
+    "arguments": properties.node
+  }
   
+  let response = await tr.postJSON(payload)
+  let jsonResponse = parseJson(await response.body)
+
+  return SetTorrentResponse(result: jsonResponse["result"].getStr())
+
+
+proc setTorrents*(tr:TransmissionRemote, torrents: openarray[int] = @[], properties: TorrentProperties): Future[SetTorrentResponse] =
+  properties.ids = @torrents
+  tr.setTorrentsInner(properties)
+  
+proc setTorrent*(tr: TransmissionRemote, torrentId: int, properties: TorrentProperties): Future[SetTorrentResponse] =
+  properties.ids = @[torrentId]
+  tr.setTorrentsInner(properties)
+
 proc voidResponse(f: Future[AsyncResponse]): Future[void] {.async.} =
   let response = await f
-  echo await response.body
 
 proc removeTorrents*(tr: TransmissionRemote, ids: varargs[int] = []): Future[void] =
   let payload = %*{
@@ -445,3 +480,6 @@ proc removeTorrent*(tr: TransmissionRemote, id: int, deleteLocalData = false): F
 proc removeTorrentAndData*(tr: TransmissionRemote, id: int): Future[void] =
   tr.removeTorrentsAndData(id)
 
+  
+when isMainModule:
+  discard
